@@ -1,0 +1,565 @@
+---
+title: "PST107 Assignment1"
+author: "David Fransham"
+date: "2022-10-11"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+INTRODUCTION - MOTIVATION/BACKGROUND
+____________________________________
+
+I have long held an assumption that when unemployment rises, the Police have more work to do, so for this project I decided to investigate whether there is a correlation between the unemployment rate and recorded crimes in New Zealand.
+
+The context in which I have made this assertion is in reference to the job security enjoyed by Police officers, and the statement is something to the effect of "When everybody else is losing their jobs, the Police have more work to do, so they're never at risk of being made redundant when times are tough".
+
+While not usually specified further than that when I have made the assertion in the past, I believe the assumption relates most closely to dishonesty offences such as thefts and burglaries, lower level violence offences such as assaults and injuring, and to some extent robbery, which combines theft and violence.
+
+
+HYPOTHESIS
+__________
+
+The hypothesis of this analysis is therefore this: there is a correlation between the unemployment rate and the number of offences reported to the New Zealand Police.  Null hypothesis and alternative hypotheses are discussed further in the analysis phase.
+
+
+IMPORTING DATA
+______________
+
+To perform analysis of this assumption, I started by downloading the latest unemployment data as well as a table of recorded crime from stats.govt.nz.  I later decided to download a slightly older version of the unemployment data, as the original data only had a 7 year overlap with the crime data, which didn't allow for very much comparison to be made.
+
+In both cases of unemployment data, there was no downloadable table, so I selected the table of data, copied and pasted it into Excel and saved as a CSV file, which I then imported.
+
+```{r Import data frames}
+#https://www.stats.govt.nz/indicators/unemployment-rate/
+raw_ue_df = read.csv("unemploymentdownload.csv")
+
+#https://nzdotstat.stats.govt.nz/wbos/Index.aspx?DataSetCode=TABLECODE7405
+raw_crime_df = read.csv("TABLECODE7405_Data_390066ef-f85e-4c76-9877-73dedb517c50.csv")
+
+#https://www.stats.govt.nz/news/unemployment-rate-falls-to-3-9-percent/
+raw_ue2_df <- read.csv("unemploymentdownload2.csv")
+```
+
+
+LIBRARIES USED
+______________
+
+For this project I only used the tidyverse library, although from within that I believe I made use of some dplyr functions and some ggplot2 functions.
+
+```{r Add relevant libraries}
+#install.packages("tidyverse")
+library(tidyverse)
+```
+
+DATA CLEANING
+_____________
+
+In order to carry out meaningful comparison of the data, I had to do some manipulation of the data tables.
+
+The crime data was recorded annually, whereas the unemployment data was recorded quarterly, so I decided to take the annual average of the unemployment data in order to be comparing datasets with the same time frequency.
+
+Additionally, the crime data contained information on recorded crimes from each Police district as well as total across all of New Zealand.  Given that my unemployment data was only on a national level, I excluded the local district data for crimes, and only focussed on the national data - again to be comparing datasets across the same geographical lines.
+
+```{r Manipulating Crime Data}
+#wCrime = working crime dataframe
+wCrime <- filter(raw_crime_df,Location == "Total New Zealand")
+wCrime <- filter(wCrime, Measure == "Recorded")
+```
+
+
+```{r Manipulating Unemployment Data}
+#wUe = working unemployment dataframe (version 1)
+dates <- sub("Jun-", "01/06/", raw_ue_df$Quarter)
+dates <- sub("Sep-", "01/09/", dates)
+dates <- sub("Dec-", "01/12/", dates)
+dates <- sub("Mar-", "01/03/", dates)
+dates <- as.Date(dates, "%d/%m/%y")
+wUe <- raw_ue_df
+wUe$Quarter <- dates
+remove(dates)
+
+#calculate average on an annual basis
+wUe <- wUe %>%
+  mutate(Year = format(Quarter, "%Y")) %>%
+  group_by(Year) %>%
+  summarise("Avg (Men)" = mean(Men), "Avg (Women)" = mean(Women), "Avg (Total)" = mean(Total))
+
+```
+
+```{r Combining Data Sets}
+#combined data - working crime and working unemployment dataframes
+combined_df <- filter(wCrime, Year >= 2007, Year <= 2014, Offence == "Total Offences")
+
+temp_df <- filter(wUe, Year >= 2007, Year <= 2014)
+
+combined_df$"% Unemployed (Men)" <- temp_df$`Avg (Men)`
+combined_df$"% Unemployed (Women)" <- temp_df$`Avg (Women)`
+combined_df$"% Unemployed (Total)" <- temp_df$`Avg (Total)`
+
+remove(temp_df)
+
+combined_df <- subset(combined_df, select = -c(4))
+
+#change "Value" heading for "Offences" to reflect what is being shown
+combined_df <- rename(combined_df, Offences = Value)
+```
+
+
+OVERVIEW VISUALISATION
+______________________
+
+In order to get a basic idea of what's actually happening, I plotted Total Offences recorded against time, and Total Unemployment rate against time.  It was after this that I realised that there really wasn't enough data to compare across only 7 years, so I decided to extend the range of my unemployment data by getting an older table of data.
+
+```{r Begin Plotting}
+#plot unemployment rate
+plot1 <- ggplot(data = combined_df, mapping = aes(x = Year, y =`% Unemployed (Total)`)) + geom_line()
+plot1
+
+#plot total offences recorded
+plot2 <- ggplot(data = combined_df, mapping = aes(x = Year, y =`Offences`)) + geom_line()
+plot2
+```
+I made an attempt to have two plots shown on one image, utilising both Y axes, however with such a vast difference in scale, it didn't come out looking quite how I wanted, so I abandoned any further attempt at this.
+
+```{r Trialling dual plot}
+
+# A few constants  
+coeff <- 100000
+percentColour <- "#69b3a2"
+offenceColour <- rgb(0.2, 0.6, 0.9, 1)
+
+ggplot(data = combined_df, mapping = aes(x=Year)) +
+  
+  geom_line(mapping = aes(y=`% Unemployed (Total)`), size=2, colour = percentColour) + 
+  geom_line(mapping = aes(y=Offences / coeff), size=2, colour = offenceColour) + 
+  
+  scale_y_continuous(
+    
+    # Features of the first axis
+    name = "Percent Unemployed",
+    
+    # Add a second axis and specify its features
+    sec.axis = sec_axis(~.*coeff, name="Offences Recorded")
+  )
+
+remove(coeff)
+remove(percentColour)
+remove(offenceColour)
+```
+I carried out the same data manipulation on the new unemployment data as I did with the previous version.
+
+```{r Manipulate Alternative Unemployment Data}
+#working unemployment dataframe (version 2)
+dates <- sub("Jun-", "01/06/", raw_ue2_df$Quarter)
+dates <- sub("Sep-", "01/09/", dates)
+dates <- sub("Dec-", "01/12/", dates)
+dates <- sub("Mar-", "01/03/", dates)
+dates <- as.Date(dates, "%d/%m/%y")
+wUe2 <- raw_ue2_df
+wUe2$Quarter <- dates
+remove(dates)
+
+#Average quarters to have a yearly unemployment rate
+wUe2 <- wUe2 %>%
+  mutate(Year = format(Quarter, "%Y")) %>%
+  group_by(Year) %>%
+  summarise("Unemployment" = mean(Seasonally.adjusted))
+```
+
+I combined the second set of data then decided to redo it because I didn't like the way it looked, so I've kept this block here for the sake of showing my progression, but ultimately it is irrelevant.
+
+```{r Combining Data ver2}
+#combined data - working crime and working unemployment dataframes
+combined2 <- filter(wCrime, Year >= 1994, Year <= 2014, Offence == "Total Offences")
+
+temp_df <- filter(wUe2, Year >= 1994, Year <= 2014)
+
+combined2$"Unemployment Rate" <- temp_df$Unemployment
+
+remove(temp_df)
+
+combined2 <- subset(combined2, select = -c(1,4))
+combined2 <- rename(combined2, Offences = Value)
+combined2
+```
+
+For the sake of tidiness of the workspace, I removed data and variables that I decided I didn't need any more, but I left the "Raw" files I had imported from CSV in case I needed to run the code again, and didn't want to have to keep lugging the raw files around.
+
+```{r Remove data frames etc no longer needed}
+remove(combined_df, combined2, wUe)
+
+```
+
+The crime data table had the offence types listed all in one column with years and values associated. To make better use of the data, I extracted (manually, because I'm still very much a beginner in R) the number of offences recorded against each time, and stored them by year in the same rows as the unemployment data for that year.  I repeated this for each offence type, even though I originally didn't plan on using all the different crime types, I decided to do it for the sake of completeness.
+
+
+```{r Combining Data ver3}
+#ingest Unemployment data, year and total offences
+temp_df <- filter(wUe2, Year >= 1994, Year <= 2014)
+UnemploymentRate <- temp_df$Unemployment
+remove(temp_df)
+
+temp_df <- filter(wCrime, Offence == "Total Offences")
+Year <- temp_df$Year
+TotalOffences <- temp_df$Value
+combined3 <- data.frame(Year, UnemploymentRate, TotalOffences)
+
+#ingest homicide offence figures
+temp_df <- filter(wCrime, Offence == "Homicide and related offences")
+HomicideEtc <- temp_df$Value
+combined3$HomicideEtc <- HomicideEtc
+
+#ingest injury offence figures
+temp_df <- filter(wCrime, Offence == "Acts intended to cause injury")
+InjuryActs <- temp_df$Value
+combined3$InjuryActs <- InjuryActs
+
+#ingest sexual offence figures
+temp_df <- filter(wCrime, Offence == "Sexual assault and related offences")
+SexAssaults <- temp_df$Value
+combined3$SexAssaults <- SexAssaults
+
+#ingest "dangerous act" offence figures
+temp_df <- filter(wCrime, Offence == "Dangerous or negligent acts endangering persons")
+DangerousActs <- temp_df$Value
+combined3$DangerousActs <- DangerousActs
+
+#ingest abduction offence figures
+temp_df <- filter(wCrime, Offence == "Abduction, harassment and other related offences against a person")
+AbductionEtc <- temp_df$Value
+combined3$AbductionEtc <- AbductionEtc
+
+#ingest robbery offence figures
+temp_df <- filter(wCrime, Offence == "Robbery, extortion and related offences")
+RobberyEtc <- temp_df$Value
+combined3$RobberyEtc <- RobberyEtc
+
+#ingest burglary offence figures
+temp_df <- filter(wCrime, Offence == "Unlawful entry with intent/burglary, break and enter")
+BurglaryEtc <- temp_df$Value
+combined3$BurglaryEtc <- BurglaryEtc
+
+#ingest theft offence figures
+temp_df <- filter(wCrime, Offence == "Theft and related offences")
+TheftEtc <- temp_df$Value
+combined3$TheftEtc <- TheftEtc
+
+#ingest fraud offence figures
+temp_df <- filter(wCrime, Offence == "Fraud, deception and related offences")
+FraudEtc <- temp_df$Value
+combined3$FraudEtc <- FraudEtc
+
+#ingest drug offence figures
+temp_df <- filter(wCrime, Offence == "Illicit drug offences")
+Drugs <- temp_df$Value
+combined3$Drugs <- Drugs
+
+#ingest weapon offence figures
+temp_df <- filter(wCrime, Offence == "Prohibited and regulated weapons and explosives offences")
+Weapons <- temp_df$Value
+combined3$Weapons <- Weapons
+
+#ingest property damage offence figures
+temp_df <- filter(wCrime, Offence == "Property damage and environmental pollution")
+PropertyDmg <- temp_df$Value
+combined3$PropertyDmg <- PropertyDmg
+
+#ingest disorder offence figures
+temp_df <- filter(wCrime, Offence == "Public order offences")
+Disorder <- temp_df$Value
+combined3$Disorder <- Disorder
+
+#ingest Justice offence figures
+temp_df <- filter(wCrime, Offence == "Offences against justice procedures, government security and government operations")
+Justice <- temp_df$Value
+combined3$Justice <- Justice
+
+#ingest miscellaneous offence figures
+temp_df <- filter(wCrime, Offence == "Miscellaneous offences")
+MiscOffences <- temp_df$Value
+combined3$MiscOffences <- MiscOffences
+
+#remove working data to keep workspace tidy
+remove(Year,TotalOffences,UnemploymentRate, HomicideEtc, InjuryActs, SexAssaults, DangerousActs, AbductionEtc, RobberyEtc, BurglaryEtc, TheftEtc, FraudEtc, Drugs, Weapons, PropertyDmg, Disorder, Justice, MiscOffences, temp_df)
+```
+
+
+VISUALISATION
+_____________
+
+Having imported all of the data, I then made a plot for each variable with time (year) on the x axis and the variable in question on the y axis.
+
+```{r CreatingPlots}
+#define colour constants
+unemColour <- rgb(0, 0, 0, 1)
+totalColour <- rgb(0.5, 0, 0, 1)
+homColour <- rgb(0, 0.5, 0, 1)
+injColour <- rgb(0, 0, 0.5, 1)
+sexColour <- rgb(0.5, 0, 0.5, 1)
+dangColour <- rgb(0.5, 0.5, 0, 1)
+abdColour <- rgb(0, 0.5, 0.5, 1)
+robColour <- rgb(0.5, 0.5, 0.5, 1)
+burgColour <- rgb(1, 0.5, 0, 1)
+thefColour <- rgb(1, 0, 0.5, 1)
+frauColour <- rgb(0.5, 1, 0, 1)
+drugColour <- rgb(0.5, 0, 1, 1)
+weapColour <- rgb(0, 0.5, 1, 1)
+propColour <- rgb(0, 1, 0.5, 1)
+disoColour <- rgb(1, 0, 1, 1)
+justColour <- rgb(1, 1, 0, 1)
+miscColour <- rgb(0, 1, 1, 1)
+
+#plot unemployment rate
+Plot_Unemployed <- ggplot(data = combined3, mapping = aes(x=Year)) +
+                    geom_line(mapping = aes(y = UnemploymentRate), size=2, colour = unemColour)
+  Plot_Unemployed + labs(title = "Percent Unemployed by Year")
+
+#plot total offences
+Plot_Total <-  ggplot(data = combined3, mapping = aes(x=Year)) +
+                    geom_line(mapping = aes(y = TotalOffences), size=2, colour = totalColour)
+   Plot_Total + labs(title = "Total Recorded Offences by Year")
+
+#plot homicide offences
+Plot_Murder <- ggplot(data = combined3, mapping = aes(x=Year)) +
+                  geom_line(mapping = aes(y = HomicideEtc), size=2, colour = homColour)
+   Plot_Murder + labs(title = "Homicide and related offences recorded by Year")
+
+#plot injury offences   
+Plot_Injury <- ggplot(data = combined3, mapping = aes(x=Year)) +
+                  geom_line(mapping = aes(y = InjuryActs), size=2, colour = injColour)
+  Plot_Injury + labs(title = "Acts intended to cause injury recorded by Year")
+
+#plot sexual offences  
+Plot_Sex <- ggplot(data = combined3, mapping = aes(x=Year)) +
+                  geom_line(mapping = aes(y = SexAssaults), size=2, colour = sexColour)
+  Plot_Sex + labs(title = "Sexual assault and related offences recorded by Year")
+
+#plot dangerous act offences
+Plot_Danger <- ggplot(data = combined3, mapping = aes(x=Year)) +
+                  geom_line(mapping = aes(y = DangerousActs), size=2, colour = dangColour)
+  Plot_Danger + labs(title = "Dangerous or negligent acts endangering persons recorded by Year")
+
+#plot abduction offences  
+Plot_Abduction <- ggplot(data = combined3, mapping = aes(x=Year)) +
+                  geom_line(mapping = aes(y = AbductionEtc), size=2, colour = abdColour)
+  Plot_Abduction + labs(title = "Abduction, harassment and other related offences against a person recorded by Year")
+
+#plot robbery offences
+Plot_Robbery <- ggplot(data = combined3, mapping = aes(x=Year)) +
+                  geom_line(mapping = aes(y = RobberyEtc), size=2, colour = robColour)
+  Plot_Robbery + labs(title = "Robbery, extortion and related offences recorded by Year")
+
+#plot burglary offences  
+Plot_Burglary <- ggplot(data = combined3, mapping = aes(x=Year)) +
+                  geom_line(mapping = aes(y = BurglaryEtc), size=2, colour = burgColour)
+  Plot_Burglary + labs(title = "Unlawful entry with intent/burglary, break and enter offences recorded by Year")
+
+#plot theft offences
+Plot_Theft <-  ggplot(data = combined3, mapping = aes(x=Year)) +
+                    geom_line(mapping = aes(y = TheftEtc), size=2, colour = thefColour)
+   Plot_Theft + labs(title = "Theft and related offences recorded by Year")
+
+#plot fraud offences   
+Plot_Fraud <- ggplot(data = combined3, mapping = aes(x=Year)) +
+                  geom_line(mapping = aes(y = FraudEtc), size=2, colour = frauColour)
+   Plot_Fraud + labs(title = "Fraud, deception and related offences recorded by Year")
+
+#plot drug offences
+Plot_Drugs <- ggplot(data = combined3, mapping = aes(x=Year)) +
+                  geom_line(mapping = aes(y = Drugs), size=2, colour = drugColour)
+  Plot_Drugs + labs(title = "Illicit drug offences recorded by Year")
+
+#plot weapon offences  
+Plot_Weapons <- ggplot(data = combined3, mapping = aes(x=Year)) +
+                  geom_line(mapping = aes(y = Weapons), size=2, colour = weapColour)
+  Plot_Weapons + labs(title = "Prohibited and regulated weapons and explosives offences recorded by Year")
+
+#plot property offences  
+Plot_Property <- ggplot(data = combined3, mapping = aes(x=Year)) +
+                  geom_line(mapping = aes(y = PropertyDmg), size=2, colour = propColour)
+  Plot_Property + labs(title = "Property damage and environmental pollution offences recorded by Year")
+
+#plot disorder offences  
+Plot_Disorder <- ggplot(data = combined3, mapping = aes(x=Year)) +
+                  geom_line(mapping = aes(y = Disorder), size=2, colour = disoColour)
+  Plot_Disorder + labs(title = "Public order offences recorded by Year")
+
+#plot justice offences  
+Plot_Justice <- ggplot(data = combined3, mapping = aes(x=Year)) +
+                  geom_line(mapping = aes(y = Justice), size=2, colour = justColour)
+  Plot_Justice + labs(title = "Offences against justice procedures etc recorded by Year")
+
+#plot miscellaneous offences  
+Plot_Misc <- ggplot(data = combined3, mapping = aes(x=Year)) +
+                  geom_line(mapping = aes(y = MiscOffences), size=2, colour = miscColour)
+  Plot_Misc + labs(title = "Miscellaneous offences recorded by Year")
+
+```
+
+For the sake of being able to compare the different offence categories viewed above a little more easily, I constructed a bar plot to show the actual numbers compared to each other for 2004, approximately the middle of the sample data period.
+
+```{r comparing numbers of different offence types}
+oneRow <- combined3 %>%
+  slice(11) %>%
+  as.numeric()
+
+colNames <- names(combined3)
+colNames <- colNames[-1]
+colNames <- colNames[-1]
+colNames <- colNames[-1]
+
+oneRow <- oneRow[-1]
+oneRow <- oneRow[-1]
+oneRow <- oneRow[-1]
+
+newDF <- data.frame(colNames)
+newDF$NumberRecorded <- oneRow
+newDF <- rename(newDF, OffenceType = colNames)
+
+CColour = scale_fill_manual(values = c("HomicideEtc" = homColour,
+                                        "InjuryActs" = injColour,
+                                        "SexAssaults" = sexColour,
+                                        "DangerousActs" = dangColour,
+                                        "AbductionEtc"= abdColour,
+                                        "RobberyEtc"= robColour,
+                                        "BurglaryEtc"= burgColour,
+                                        "TheftEtc" = thefColour,
+                                        "FraudEtc" = frauColour,
+                                        "Drugs" = drugColour,
+                                        "Weapons" = weapColour,
+                                        "PropertyDmg" = propColour,
+                                        "Disorder" = disoColour,
+                                        "Justice" = justColour,
+                                        "MiscOffences" = miscColour))
+
+offenceSplitPlot <- ggplot(newDF, aes(x=NumberRecorded, y=  OffenceType, fill = factor(OffenceType))) + 
+  geom_bar(stat = "identity", width = 1, colour = "black") +
+  CColour +
+  labs(title = "Split of Offences Recorded in 2004")
+
+offenceSplitPlot
+
+```
+
+From a first glance at the plots, it was not immediately clear that there were any strong correlations between unemployment rate and either total offences recorded, or particular categories of offences, although there are a few with possibly a similar trajectory over time.
+
+To statistically show correlation, I considered the Pearson test, however it is designed for linear relations between normally distributed data sets, and none of the plots seem to show a linear relation, so this test didn't seem to be appropriate.
+
+While considering the Pearson test, I did the Shapiro Wilks test for normal distribution across each data set, however I ended up not using it once I decided to not use the Pearson test.
+
+```{r Shapiro-Wilk normality test}
+#ShapiroVec <- lapply(combined3, shapiro.test)
+#ShapiroVec
+```
+
+
+ALGORITHMS/TESTS USED
+_____________________
+
+
+Having ruled out Pearson's test, I considered the Spearman and Kendall correlation tests.  I decided to use the Kendall test as it is said to be more accurate for small sample sizes, and as I only have 20 years of data to compare, I considered this to be the more appropriate test.
+
+I ran the test for each column of crime data against the unemployment data, with the Null hypothesis being that the two variables (Unemployment and one of the crime stats) are uncorrelated.
+
+```{r Kendall correlation test}
+
+test1 <- cor.test(combined3$UnemploymentRate, combined3$TotalOffences,method = ("kendall"))
+
+testDF <- combined3
+testDF <- subset(testDF, select = -c(1,2))
+testDF <- slice(testDF, (1:8))
+
+testDF$TotalOffences <- cor.test(combined3$UnemploymentRate, combined3$TotalOffences,method = ("kendall"))
+testDF$HomicideEtc <- cor.test(combined3$UnemploymentRate, combined3$HomicideEtc,method = ("kendall"))
+testDF$InjuryActs <- cor.test(combined3$UnemploymentRate, combined3$InjuryActs,method = ("kendall"))
+testDF$SexAssaults <- cor.test(combined3$UnemploymentRate, combined3$SexAssaults,method = ("kendall"))
+testDF$DangerousActs <- cor.test(combined3$UnemploymentRate, combined3$DangerousActs,method = ("kendall"))
+testDF$AbductionEtc <- cor.test(combined3$UnemploymentRate, combined3$AbductionEtc,method = ("kendall"))
+testDF$RobberyEtc <- cor.test(combined3$UnemploymentRate, combined3$RobberyEtc,method = ("kendall"))
+testDF$BurglaryEtc <- cor.test(combined3$UnemploymentRate, combined3$BurglaryEtc,method = ("kendall"))
+testDF$TheftEtc <- cor.test(combined3$UnemploymentRate, combined3$TheftEtc,method = ("kendall"))
+testDF$FraudEtc <- cor.test(combined3$UnemploymentRate, combined3$FraudEtc,method = ("kendall"))
+testDF$Drugs <- cor.test(combined3$UnemploymentRate, combined3$Drugs,method = ("kendall"))
+testDF$Weapons <- cor.test(combined3$UnemploymentRate, combined3$Weapons,method = ("kendall"))
+testDF$PropertyDmg <- cor.test(combined3$UnemploymentRate, combined3$PropertyDmg,method = ("kendall"))
+testDF$Disorder <- cor.test(combined3$UnemploymentRate, combined3$Disorder,method = ("kendall"))
+testDF$Justice <- cor.test(combined3$UnemploymentRate, combined3$Justice,method = ("kendall"))
+testDF$MiscOffences <- cor.test(combined3$UnemploymentRate, combined3$MiscOffences,method = ("kendall"))
+
+```
+
+FINDINGS
+________
+
+
+Analysis of the data yields the following:
+
+Total Offences returns a P-value of 0.057, which although close, is not sufficient to reject the null hypothesis that Unemployment and Total Offences are uncorrelated at the 0.05 significance level.
+
+Homicide offences returns a P-value of 0.5, which is insufficient to reject the null hypothesis.
+
+Injury Offences returns a P-value of 0.023 - which may be sufficient to reject the null hypothesis.  More on that later.
+
+Continuing through the categories, the following offence types returned a p-value insufficient to reject the null hypothesis:
+ - Total Offences: 0.057
+ - Homicide offences: 0.504
+ - Sexual assaults: 0.264
+ - Theft offences: 0.109
+ - Disorder: 0.075
+ - Miscellaneous: 0.138
+
+The rest of the offence categories returned P-values which may be sufficient to reject the null hypothesis that the variables are uncorrelated:
+ - Injury acts: 0.023
+ - Dangerous acts: 0.005
+ - Abduction: 0.023
+ - Robbery: 0.010
+ - Burglary: 0.020
+ - Fraud: 0.049
+ - Drugs: 0.002
+ - Weapons: 0.012
+ - Property Damage: 0.004
+ - Justice: 0.002
+
+
+```{r isolating statistically significant data}
+significant <- subset(testDF,select = InjuryActs:Justice)
+significant <- subset(significant, select = -c(2,7,12))
+```
+
+Analysing the Tau coefficient values of the variables for which the null hypothesis could not be ruled out shows that the Tau coefficient is as follows:
+ - Injury: -0.358
+ - Dangerous acts: 0.446
+ - Abduction: -0.358
+ - Robbery: -0.406
+ - Burglary: 0.368
+ - Fraud: 0.320
+ - Drugs: 0.482
+ - Weapons: -0.373
+ - Property Damage: -0.453
+ - Justice: -0.501
+ 
+These Tau values seem to show support for the alternative hypothesis that there is a correlation between the unemployment rate and the recorded crime numbers in the data observed, however it is worth noting that the figure indicates possible negative correlation in 6 of the categories, and positive correlation in the remaining 4.
+
+The strongest support for a potential correlation appears in the data for "Offences against justice", which do not really fit the theory posited at the beginning of this exercise.  At face value, there doesn't appear to be any particular reason for offences against justice to be impacted in any way by unemployment.
+
+If I were to examine the original assumption more closely, I would probably expect that the offences most likely to be related to unemployment rate would be dishonesty offences such as Theft and Burglary, and violence offences such as Injury Acts and Dangerous Acts, and offences which are both theft and violence combined, namely Robbery.
+
+
+PERSONAL OPINION
+________________
+
+That injury and dangerous acts offences seem to have opposite correlations, and that Burglary and Robbery also have opposite correlations, while theft shows no correlation at all, leads me to conclude that the original assumption is flawed.  There is some possible evidence of correlation in some of the data analysed, but when linked back to the original assumption, that correlation is not clear in strength or direction, and the assumption appears to be incorrect, based on this data set.
+
+
+REFLECTION / FUTURE
+___________________
+
+In the process of carrying out this analysis, I have realised that "Unemployment Rate" is a very particular set of data, and may not be the most useful for exploring the assumption made at the outset.
+
+Statistics New Zealand defines an unemployed person as someone who: has no job, is of working age, is available for work, and has looked for work in the past four weeks or has a new job to start within the next four weeks.  The unemployment rate is therefore the percentage of the working age population who are unemployed.  Currently, the unemployment rate is 3.3%, while the "Employment Rate" is 68.5%.  There is therefore 28.2% of the working age population who are not employed, but are also not categorised as "unemployed" because they do not meet the definition of an unemployed person.
+
+To examine the assumption/assertion that this research is the subject of further, it may be necessary to look at similar data again, with a focus on other aspects of people who are not working as well, such as particular types of benefits, or data that may be available on the number of redundancies in a given time period, in addition to the base "Unemployment rate".
